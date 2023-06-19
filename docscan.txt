@@ -1,0 +1,104 @@
+package com.example;
+
+import com.azure.ai.formrecognizer.DocumentAnalysisClient;
+import com.azure.ai.formrecognizer.DocumentAnalysisClientBuilder;
+import com.azure.ai.formrecognizer.models.AnalyzeResult;
+import com.azure.ai.formrecognizer.models.DocumentPage;
+import com.azure.core.credential.AzureKeyCredential;
+import com.azure.core.util.BinaryData;
+import com.microsoft.azure.functions.ExecutionContext;
+import com.microsoft.azure.functions.HttpMethod;
+import com.microsoft.azure.functions.HttpRequestMessage;
+import com.microsoft.azure.functions.HttpResponseMessage;
+import com.microsoft.azure.functions.annotation.AuthorizationLevel;
+import com.microsoft.azure.functions.annotation.BlobTrigger;
+import com.microsoft.azure.functions.annotation.FunctionName;
+import com.microsoft.azure.functions.annotation.HttpTrigger;
+
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Optional;
+import java.util.regex.Pattern;
+
+public class DocumentScannerFunction {
+
+    private static final Pattern LICENSE_PATTERN = Pattern.compile("your-license-regex-pattern");
+    private static final Pattern DOB_PATTERN = Pattern.compile("your-dob-regex-pattern");
+    private static final Pattern MOTHER_NAME_PATTERN = Pattern.compile("your-mother-name-regex-pattern");
+    private static final Pattern ADDRESS_PATTERN = Pattern.compile("your-address-regex-pattern");
+
+    @FunctionName("scanDocuments")
+    public void run(
+            @BlobTrigger(name = "content", path = "documents/{name}", dataType = "binary", connection = "AzureWebJobsStorage") byte[] content,
+            ExecutionContext context) {
+
+        String formRecognizerEndpoint = System.getenv("FORM_RECOGNIZER_ENDPOINT");
+        String formRecognizerKey = System.getenv("FORM_RECOGNIZER_KEY");
+
+        try {
+            // Initialize Form Recognizer Client for OCR
+            DocumentAnalysisClient documentAnalysisClient = new DocumentAnalysisClientBuilder()
+                    .endpoint(formRecognizerEndpoint)
+                    .credential(new AzureKeyCredential(formRecognizerKey))
+                    .buildClient();
+
+            // Perform OCR on the document
+            AnalyzeResult analyzeResult = documentAnalysisClient.beginAnalyzeDocumentFromUrl(
+                    "prebuilt-layout", // Use pre-built model for document layout
+                    content).getFinalResult();
+
+            // Extract text from the OCR result
+            StringBuilder extractedText = new StringBuilder();
+            for (DocumentPage page : analyzeResult.getPages()) {
+                extractedText.append(page.getContent());
+            }
+
+            // Analyze extracted text to detect unauthorized documents
+            String text = extractedText.toString();
+            if (isUnauthorizedDocument(text)) {
+                if (containsSensitiveInformation(text)) {
+                    triggerLogicApp(text, context);
+                }
+            }
+        } catch (Exception e) {
+            context.getLogger().severe("An error occurred: " + e.getMessage());
+        }
+    }
+
+    private boolean isUnauthorizedDocument(String text) {
+        // Check if the text matches patterns typical for unauthorized documents (e.g., driver's licenses)
+        return LICENSE_PATTERN.matcher(text).find();
+    }
+
+    private boolean containsSensitiveInformation(String text) {
+        return DOB_PATTERN.matcher(text).find() &&
+               MOTHER_NAME_PATTERN.matcher(text).find() &&
+               ADDRESS_PATTERN.matcher(text).find();
+    }
+
+    private void triggerLogicApp(String text, ExecutionContext context) {
+        String logicAppUrl = System.getenv("LOGIC_APP_URL");
+
+        Map<String, String> headers = new HashMap<>();
+        headers.put("Content-Type", "application/json");
+
+        HttpRequestMessage<Optional<String>> request = new HttpRequestMessage<>(
+                HttpMethod.POST,
+                logicAppUrl,
+                headers,
+                Optional.of("{\"documentText\": \"" + text + "\"}")
+        );
+
+        HttpResponseMessage response;
+        try {
+            response = request.invoke().get();
+            if (response.getStatus() == 200 || response.getStatus() == 202) {
+                context.getLogger().info("Successfully triggered the Logic App.");
+            } else {
+                context.getLogger().severe("Failed to trigger the Logic App.");
+            }
+        } catch (Exception e) {
+            context.getLogger().severe("An error occurred while triggering the Logic App: " + e.getMessage());
+        }
+    }
+}
