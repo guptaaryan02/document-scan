@@ -1,0 +1,66 @@
+import com.azure.ai.formrecognizer.FormRecognizerAsyncClient;
+import com.azure.ai.formrecognizer.FormRecognizerClientBuilder;
+import com.azure.ai.formrecognizer.models.FormField;
+import com.azure.ai.formrecognizer.models.FormPage;
+import com.azure.ai.formrecognizer.models.RecognizedForm;
+import com.azure.core.credential.AzureKeyCredential;
+import com.azure.storage.blob.BlobClient;
+import com.azure.storage.blob.BlobClientBuilder;
+import com.microsoft.azure.functions.annotation.*;
+import com.microsoft.azure.functions.*;
+
+import java.time.LocalDate;
+import java.util.List;
+import java.util.Map;
+
+public class Function {
+    @FunctionName("processDocument")
+    public void run(
+        @BlobTrigger(name = "content", path = "input/{name}", connection = "AzureWebJobsStorage") byte[] content,
+        @BindingName("name") String name,
+        final ExecutionContext context) {
+
+        context.getLogger().info("Processing document: " + name);
+
+        String formRecognizerEndpoint = System.getenv("FORM_RECOGNIZER_ENDPOINT");
+        String formRecognizerKey = System.getenv("FORM_RECOGNIZER_KEY");
+
+        FormRecognizerAsyncClient client = new FormRecognizerClientBuilder()
+            .credential(new AzureKeyCredential(formRecognizerKey))
+            .endpoint(formRecognizerEndpoint)
+            .buildAsyncClient();
+
+        // Analyze form
+        client.beginRecognizeContent(content).getFinalResult().subscribe(formPageFlux -> processFormPages(formPageFlux, name, context));
+    }
+
+    private void processFormPages(List<FormPage> formPages, String documentName, ExecutionContext context) {
+        for (FormPage formPage : formPages) {
+            Map<String, FormField> fields = formPage.getFields();
+
+            FormField expiryDateField = fields.get("ExpiryDate"); // Adjust according to your form field name
+            if (expiryDateField != null && LocalDate.parse(expiryDateField.getValue().asString()).isBefore(LocalDate.now())) {
+                context.getLogger().info("Document is expired: " + documentName);
+
+                // Move to expired documents blob
+                String storageConnectionString = System.getenv("AZURE_STORAGE_CONNECTION_STRING");
+                String expiredContainerName = "expired"; // Replace with your expired documents container name
+
+                BlobClient sourceBlobClient = new BlobClientBuilder()
+                    .connectionString(storageConnectionString)
+                    .containerName("input")
+                    .blobName(documentName)
+                    .buildClient();
+
+                BlobClient targetBlobClient = new BlobClientBuilder()
+                    .connectionString(storageConnectionString)
+                    .containerName(expiredContainerName)
+                    .blobName(documentName)
+                    .buildClient();
+
+                targetBlobClient.upload(sourceBlobClient.openInputStream(), true);
+                sourceBlobClient.delete();
+            }
+        }
+    }
+}
