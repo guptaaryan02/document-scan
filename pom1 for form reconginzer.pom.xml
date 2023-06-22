@@ -1,0 +1,57 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.yourgroup</groupId>
+    <artifactId>yourartifact</artifactId>
+    <version>1.0-SNAPSHOT</version>
+    <packaging>jar</packaging>
+
+    <properties>
+        <java.version>1.8</java.version>
+        <azure.functions.maven.plugin.version>1.10.0</azure.functions.maven.plugin.version>
+        <azure.functions.java.library.version>1.4.2</azure.functions.java.library.version>
+        <functionAppName>yourFunctionAppName</functionAppName>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.azure</groupId>
+            <artifactId>azure-ai-formrecognizer</artifactId>
+            <version>3.1.2</version>  <!-- Adjust as per latest version -->
+        </dependency>
+        <dependency>
+            <groupId>com.azure</groupId>
+            <artifactId>azure-storage-blob</artifactId>
+            <version>12.14.0</version>  <!-- Adjust as per latest version -->
+        </dependency>
+        <dependency>
+            <groupId>com.microsoft.azure.functions</groupId>
+            <artifactId>azure-functions-java-library</artifactId>
+            <version>${azure.functions.java.library.version}</version>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>com.microsoft.azure</groupId>
+                <artifactId>azure-functions-maven-plugin</artifactId>
+                <version>${azure.functions.maven.plugin.version}</version>
+                <configuration>
+                    <appName>${functionAppName}</appName>
+                    <resourceGroup>yourResourceGroup</resourceGroup>
+                    <appServicePlanName>yourAppServicePlan</appServicePlanName>
+                    <region>yourAzureRegion</region>
+                    <runtime>
+                        <os>windows</os>
+                        <javaVersion>8</javaVersion>
+                    </runtime>
+                    <configurationSource>LOCAL</configurationSource>
+                    <deploymentType>ftp</deploymentType>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>
